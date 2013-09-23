@@ -1,20 +1,37 @@
 import Control.Concurrent            (forkIO)
-import Data.ByteString.Char8         (pack, unpack)
+import Control.Monad                 (forever)
+import Data.ByteString.Char8         (ByteString, pack, unpack)
 import Pipes
 import Pipes.Safe                    (runSafeT)
 import Pipes.Prelude                 (stdoutLn)
-import Pipes.Process                 (process)
-import Control.Monad                 (forever)
+import Pipes.Process                 (closeStdin, withProcess, writeProcess, readProcess, flushProcess)
+import System.Process                (CreateProcess, createProcess, proc)
 
 
+catProcess :: CreateProcess
+catProcess = proc "cat" []
+
+
+mergeEither :: (Monad m) => Pipe (Either a a) a m r
+mergeEither =
+    forever $ do
+      e <- await
+      yield $ either id id e
+
+unpackPipe :: (Monad m) => Pipe ByteString String m r
+unpackPipe =
+    forever $ do
+      bs <- await
+      yield $ unpack bs
+
+
+main :: IO ()
 main =
-    do (c, p) <- process "/bin/cat" [] Nothing Nothing
-       forkIO $ runSafeT $ runEffect $ yield (pack "hello\n") >-> c
-       runSafeT $ runEffect $ (p >> return ()) >-> label >-> stdoutLn
-    where
-      label =
-        forever $
-          do r <- await
-             case r of
-               (Left l)  -> yield (unpack l)
-               (Right r) -> yield (unpack r)
+    runSafeT $ withProcess catProcess $ \process ->
+        do liftIO $ forkIO $ runSafeT $ runEffect $ yield (pack "hello\n") >-> writeProcess process
+
+           runEffect $ (readProcess process >> return ()) >->
+                       mergeEither >->
+                       unpackPipe >->
+                       stdoutLn
+           return ()
