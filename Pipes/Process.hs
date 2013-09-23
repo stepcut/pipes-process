@@ -97,8 +97,9 @@ process executable args wd environment =
     do p@(_,input,inh,_,_) <- initProcess
        return $ (consumer p `finally` (liftIO $ atomically $ putTMVar input CloseStdin), producer p `finally` (destroyProcess p) )
     where
-      destroyProcess (_, _, _, tids, proch) = liftIO $
-        do mec <- getProcessExitCode proch
+      destroyProcess (_, input, _, tids, proch) = liftIO $
+        do atomically $ putTMVar input CloseStdin
+           mec <- getProcessExitCode proch
            case mec of
              Nothing ->
                  do -- putStrLn "terminating process."
